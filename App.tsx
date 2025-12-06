@@ -1,11 +1,10 @@
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { AppState, TimetableData, ProcessingStatus, DriveFile } from './types';
 import { initGoogleAuth, initGapiClient, handleLogin, listSpreadsheets, readSpreadsheet, saveJsonToDrive } from './services/driveService';
 import { parseSpreadsheetWithGemini } from './services/geminiService';
 import TimetableGrid from './components/TimetableGrid';
 
-const APP_VERSION = "v2.1 (Excel Support)";
+const APP_VERSION = "v2.2 (Deployment Ready)";
 
 // Declare global variable for SheetJS library loaded via CDN
 declare var XLSX: any;
