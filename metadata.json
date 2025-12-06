@@ -1,0 +1,5 @@
+{
+  "name": "Copy of SmartSchedule PWA",
+  "description": "A Progressive Web App that syncs with Google Drive to parse spreadsheet timetables into beautiful, interactive schedules using Gemini AI.",
+  "requestFramePermissions": []
+}
