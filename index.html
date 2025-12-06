@@ -6,14 +6,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <!-- Critical for Google Auth: 'origin' ensures the exact domain is sent without path/query, reducing mismatches -->
     <meta name="referrer" content="origin" />
-    <title>SmartSchedule PWA (v2.1)</title>
+    <title>SmartSchedule PWA (Local)</title>
+    <!-- Tailwind CSS (Keep CDN for simplicity in this setup, normally you'd install via npm) -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Google Identity Services -->
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <!-- Google API Client -->
     <script src="https://apis.google.com/js/api.js"></script>
-    <!-- SheetJS for parsing Excel files -->
-    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
     <style>
       /* Custom Scrollbar */
       ::-webkit-scrollbar {
@@ -31,20 +30,22 @@
         background: #a8a8a8;
       }
     </style>
-  <script type="importmap">
+<script type="importmap">
 {
   "imports": {
-    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.1/",
+    "vite": "https://aistudiocdn.com/vite@^7.2.6",
+    "@vitejs/plugin-react": "https://aistudiocdn.com/@vitejs/plugin-react@^5.1.1",
     "react/": "https://aistudiocdn.com/react@^19.2.1/",
     "react": "https://aistudiocdn.com/react@^19.2.1",
-    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.31.0",
-    "@vitejs/plugin-react": "https://aistudiocdn.com/@vitejs/plugin-react@^5.1.1",
-    "vite": "https://aistudiocdn.com/vite@^7.2.6"
+    "xlsx": "https://aistudiocdn.com/xlsx@^0.18.5",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.1/",
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.31.0"
   }
 }
 </script>
 </head>
   <body class="bg-slate-50 text-slate-900 font-sans antialiased selection:bg-indigo-100 selection:text-indigo-700">
     <div id="root"></div>
+    <script type="module" src="/src/index.tsx"></script>
   </body>
 </html>

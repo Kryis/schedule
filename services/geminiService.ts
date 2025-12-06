@@ -1,15 +1,13 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { TimetableData } from "../types";
 
-// Ensure the API key is available
-const API_KEY = process.env.API_KEY || '';
-
-const ai = new GoogleGenAI({ apiKey: API_KEY });
-
-export const parseSpreadsheetWithGemini = async (csvContent: string): Promise<TimetableData> => {
-  if (!API_KEY) {
-    throw new Error("Gemini API Key is missing. Please set process.env.API_KEY.");
+export const parseSpreadsheetWithGemini = async (csvContent: string, apiKey: string): Promise<TimetableData> => {
+  if (!apiKey) {
+    throw new Error("Gemini API Key is missing. Please provide a valid key.");
   }
+
+  // Initialize the client with the provided key (Dynamic initialization)
+  const ai = new GoogleGenAI({ apiKey: apiKey });
 
   const prompt = `
     You are a data processing assistant. I have raw data from a spreadsheet representing a school or work timetable.

@@ -1,13 +1,11 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { AppState, TimetableData, ProcessingStatus, DriveFile } from './types';
 import { initGoogleAuth, initGapiClient, handleLogin, listSpreadsheets, readSpreadsheet, saveJsonToDrive } from './services/driveService';
 import { parseSpreadsheetWithGemini } from './services/geminiService';
 import TimetableGrid from './components/TimetableGrid';
+import * as XLSX from 'xlsx';
 
-const APP_VERSION = "v2.2 (Deployment Ready)";
-
-// Declare global variable for SheetJS library loaded via CDN
-declare var XLSX: any;
+const APP_VERSION = "v2.3.0 (Public)";
 
 const App: React.FC = () => {
   const [appState, setAppState] = useState<AppState>(AppState.IDLE);
@@ -24,21 +22,36 @@ const App: React.FC = () => {
   // Local Mode State
   const [localInputText, setLocalInputText] = useState('');
   
-  // Configuration State
+  // Configuration State (Google Drive)
   const [clientId, setClientId] = useState<string>(() => {
-    return process.env.GOOGLE_CLIENT_ID || localStorage.getItem('GOOGLE_CLIENT_ID') || '';
+    return localStorage.getItem('GOOGLE_CLIENT_ID') || '';
   });
   const [googleApiKey, setGoogleApiKey] = useState<string>(() => {
-    return process.env.GOOGLE_PICKER_API_KEY || localStorage.getItem('GOOGLE_PICKER_API_KEY') || '';
+    return localStorage.getItem('GOOGLE_PICKER_API_KEY') || '';
   });
 
   const [tempClientId, setTempClientId] = useState(clientId);
   const [tempApiKey, setTempApiKey] = useState(googleApiKey);
   
-  const geminiApiKey = process.env.API_KEY;
+  // Gemini API Key State (Hybrid: Env Var OR LocalStorage)
+  const envGeminiKey = (() => {
+    try {
+      return import.meta.env?.VITE_API_KEY || '';
+    } catch {
+      return '';
+    }
+  })();
+
+  const [manualGeminiKey, setManualGeminiKey] = useState<string>(() => {
+    return localStorage.getItem('GEMINI_API_KEY') || '';
+  });
+
+  // Effective key is Env var (priority) OR Manual input
+  const effectiveGeminiKey = envGeminiKey || manualGeminiKey;
+  
   const currentOrigin = typeof window !== 'undefined' ? window.location.origin : '';
 
-  // Initialize Google Libraries (Only if keys are present)
+  // Initialize Google Libraries (Only if Drive keys are present)
   useEffect(() => {
     if (!clientId || !googleApiKey) {
       return; 
@@ -47,14 +60,11 @@ const App: React.FC = () => {
     setIsInitializing(true);
 
     const loadScripts = async () => {
-      const errors: string[] = [];
-
       // 1. Initialize GAPI (Client)
       try {
         await initGapiClient(googleApiKey);
       } catch (err: any) {
         console.error("GAPI Init Failed", err);
-        // Don't block app for this, just log
       }
 
       // 2. Initialize GIS (Auth)
@@ -113,23 +123,22 @@ const App: React.FC = () => {
   };
 
   const handleSaveConfig = () => {
-    if (!tempClientId.includes('.apps.googleusercontent.com')) {
-        alert("Invalid Client ID format.");
-        return;
+    if (tempClientId.trim()) {
+        localStorage.setItem('GOOGLE_CLIENT_ID', tempClientId.trim());
+        setClientId(tempClientId.trim());
     }
+    if (tempApiKey.trim()) {
+        localStorage.setItem('GOOGLE_PICKER_API_KEY', tempApiKey.trim());
+        setGoogleApiKey(tempApiKey.trim());
+    }
+    alert("Drive configuration saved.");
+  };
 
-    if (tempClientId.trim() && tempApiKey.trim()) {
-      const newClientId = tempClientId.trim();
-      const newApiKey = tempApiKey.trim();
-      
-      localStorage.setItem('GOOGLE_CLIENT_ID', newClientId);
-      localStorage.setItem('GOOGLE_PICKER_API_KEY', newApiKey);
-      
-      setClientId(newClientId);
-      setGoogleApiKey(newApiKey);
-      setErrorMsg(''); 
-      alert("Configuration saved.");
-    }
+  const handleSaveGeminiKey = () => {
+      if (manualGeminiKey.trim()) {
+          localStorage.setItem('GEMINI_API_KEY', manualGeminiKey.trim());
+          alert("Gemini API Key saved.");
+      }
   };
 
   const handleConnectClick = () => {
@@ -139,14 +148,21 @@ const App: React.FC = () => {
   };
 
   const handleReset = () => {
-      if (confirm("Clear all settings and reload?")) {
+      if (confirm("Clear all settings (including Keys) and reload?")) {
           localStorage.removeItem('GOOGLE_CLIENT_ID');
           localStorage.removeItem('GOOGLE_PICKER_API_KEY');
+          localStorage.removeItem('GEMINI_API_KEY');
           window.location.reload();
       }
   };
 
   const handleFileSelect = useCallback(async (fileId: string, name: string) => {
+    if (!effectiveGeminiKey) {
+        alert("Please configure your Gemini API Key first.");
+        setAppState(AppState.IDLE);
+        return;
+    }
+
     setAppState(AppState.READING_FILE);
     setStatus({ step: `Reading ${name}...` });
 
@@ -157,7 +173,7 @@ const App: React.FC = () => {
       // 2. Parse with Gemini
       setAppState(AppState.PARSING_AI);
       setStatus({ step: 'Analyzing schedule with Gemini AI...' });
-      const parsed = await parseSpreadsheetWithGemini(rawCsv);
+      const parsed = await parseSpreadsheetWithGemini(rawCsv, effectiveGeminiKey);
       
       // 3. Save JSON to Drive
       setAppState(AppState.SAVING_DRIVE);
@@ -178,7 +194,7 @@ const App: React.FC = () => {
       setAppState(AppState.ERROR);
       setErrorMsg(err instanceof Error ? err.message : "An unknown error occurred during processing.");
     }
-  }, []);
+  }, [effectiveGeminiKey]);
 
   // --- LOCAL MODE HANDLERS ---
   const handleLocalFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -219,6 +235,12 @@ const App: React.FC = () => {
   };
 
   const handleProcessLocal = async () => {
+      if (!effectiveGeminiKey) {
+          alert("Gemini API Key is missing. Please enter it on the home screen.");
+          setAppState(AppState.IDLE);
+          return;
+      }
+
       if (!localInputText.trim()) {
           alert("Please enter some text or upload a CSV/Excel file.");
           return;
@@ -228,7 +250,7 @@ const App: React.FC = () => {
       setStatus({ step: 'Analyzing your data with Gemini AI...' });
 
       try {
-          const parsed = await parseSpreadsheetWithGemini(localInputText);
+          const parsed = await parseSpreadsheetWithGemini(localInputText, effectiveGeminiKey);
           setTimetableData(parsed);
           setAppState(AppState.VIEW_SCHEDULE);
       } catch (err) {
@@ -251,25 +273,9 @@ const App: React.FC = () => {
 
   // --- RENDER: MAIN APP ---
   const renderContent = () => {
-    // Critical: Check for Gemini API Key first
-    if (!geminiApiKey) {
-        return (
-             <div className="text-center p-8 bg-red-50 rounded-xl border border-red-200 max-w-lg mx-auto shadow-sm">
-                <div className="w-12 h-12 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
-                </div>
-                <h2 className="text-xl font-bold text-red-900 mb-2">Environment Configuration Error</h2>
-                <p className="text-red-700 mb-6 text-sm">
-                    The <code>API_KEY</code> environment variable is missing. 
-                    This application requires a Google Gemini API Key to function.
-                </p>
-             </div>
-        )
-    }
-
     switch (appState) {
       case AppState.IDLE:
-        const hasKeys = !!(clientId && googleApiKey);
+        const hasDriveKeys = !!(clientId && googleApiKey);
         
         return (
           <div className="text-center px-4 max-w-4xl mx-auto">
@@ -282,12 +288,50 @@ const App: React.FC = () => {
                 Transform your spreadsheet timetables into beautiful, interactive schedules using Google Gemini AI.
               </p>
             </div>
+
+            {/* API Key Warning/Input */}
+            {!effectiveGeminiKey && (
+                <div className="mb-8 p-6 bg-amber-50 rounded-xl border border-amber-200 max-w-lg mx-auto text-left shadow-sm">
+                    <h3 className="font-bold text-amber-900 mb-2 flex items-center gap-2">
+                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" /></svg>
+                        Gemini API Key Required
+                    </h3>
+                    <p className="text-sm text-amber-800 mb-4">
+                        To use the AI features, please enter your Gemini API key below. 
+                        It will be saved in your browser's local storage.
+                    </p>
+                    <div className="flex gap-2">
+                        <input 
+                            type="password" 
+                            className="flex-1 px-3 py-2 border border-amber-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+                            placeholder="Paste your Gemini API Key here"
+                            value={manualGeminiKey}
+                            onChange={(e) => setManualGeminiKey(e.target.value)}
+                        />
+                        <button 
+                            onClick={handleSaveGeminiKey}
+                            className="bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-amber-700"
+                        >
+                            Save
+                        </button>
+                    </div>
+                    <p className="text-xs text-amber-700 mt-2">
+                        Don't have a key? <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="underline font-bold">Get one here</a>
+                    </p>
+                </div>
+            )}
             
             <div className="grid md:grid-cols-2 gap-6 max-w-2xl mx-auto">
-                {/* Option 1: Local Mode (Recommended for Preview) */}
+                {/* Option 1: Local Mode */}
                 <button
-                    onClick={() => setAppState(AppState.INPUT_LOCAL)}
-                    className="bg-white hover:bg-indigo-50 border-2 border-indigo-100 hover:border-indigo-300 text-slate-700 p-6 rounded-2xl shadow-sm hover:shadow-md transition group text-left flex flex-col items-center justify-center h-48"
+                    onClick={() => {
+                        if (effectiveGeminiKey) {
+                            setAppState(AppState.INPUT_LOCAL)
+                        } else {
+                            alert("Please enter a Gemini API Key first.");
+                        }
+                    }}
+                    className={`bg-white hover:bg-indigo-50 border-2 border-indigo-100 hover:border-indigo-300 text-slate-700 p-6 rounded-2xl shadow-sm hover:shadow-md transition group text-left flex flex-col items-center justify-center h-48 ${!effectiveGeminiKey ? 'opacity-50 cursor-not-allowed grayscale' : ''}`}
                 >
                      <div className="w-12 h-12 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center mb-4 group-hover:scale-110 transition">
                         <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
@@ -297,15 +341,16 @@ const App: React.FC = () => {
                 </button>
 
                 {/* Option 2: Google Drive */}
-                {!hasKeys ? (
+                {!hasDriveKeys ? (
                      <div className="bg-slate-50 border-2 border-slate-100 p-6 rounded-2xl shadow-inner text-center flex flex-col items-center justify-center h-48 opacity-75">
                          <h3 className="font-bold text-slate-600 mb-2">Connect Google Drive</h3>
                          <p className="text-xs text-slate-400 mb-4">Requires Client ID & API Key setup.</p>
                          <button 
                             onClick={() => { 
-                                // Simple UX enhancement: user can fill the inputs below
+                                const el = document.getElementById('drive-setup');
+                                el?.scrollIntoView({ behavior: 'smooth' });
                             }}
-                            className="text-indigo-600 text-sm font-bold underline cursor-default"
+                            className="text-indigo-600 text-sm font-bold underline"
                          >
                              Setup Keys below
                          </button>
@@ -313,7 +358,8 @@ const App: React.FC = () => {
                 ) : (
                     <button
                         onClick={handleConnectClick}
-                        className="bg-indigo-600 hover:bg-indigo-700 text-white p-6 rounded-2xl shadow-lg hover:shadow-xl transition group text-left flex flex-col items-center justify-center h-48"
+                        disabled={!effectiveGeminiKey}
+                        className={`bg-indigo-600 hover:bg-indigo-700 text-white p-6 rounded-2xl shadow-lg hover:shadow-xl transition group text-left flex flex-col items-center justify-center h-48 ${!effectiveGeminiKey ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
                         <div className="w-12 h-12 bg-white/20 text-white rounded-full flex items-center justify-center mb-4 group-hover:scale-110 transition">
                              <svg className="w-6 h-6" viewBox="0 0 24 24" fill="currentColor"><path d="M12.0003 20.45C7.94029 20.45 4.38029 18.23 2.31029 14.88L4.66029 10.8C4.94029 14.39 7.95029 17.25 11.6603 17.25H12.0003V20.45ZM6.64029 9.39001L4.29029 5.32001C2.56029 7.37001 1.58029 9.94001 1.58029 12.68C1.58029 13.06 1.60029 13.43 1.63029 13.8L6.64029 9.39001ZM12.0003 3.55002C14.6103 3.55002 16.9203 4.67002 18.4903 6.44002L20.4403 3.06002C18.2503 1.52002 15.3503 0.530016 12.0003 0.530016C8.07029 0.530016 4.54029 2.45002 2.45029 5.41002L5.27029 10.3C5.99029 6.47002 8.71029 3.55002 12.0003 3.55002ZM22.3803 10.97L17.7203 19.04H12.3503L16.2903 12.21L17.0203 10.97H22.3803ZM22.3803 12.67C22.4003 12.29 22.4203 11.91 22.4203 11.53C22.4203 8.35002 20.9703 5.49002 18.7203 3.65002L16.2903 7.87002C18.6703 8.33002 20.5703 10.23 21.0503 12.67H22.3803Z"/></svg>
@@ -325,35 +371,32 @@ const App: React.FC = () => {
             </div>
 
             {/* Config Section */}
-            {!hasKeys && (
-                <div className="mt-12 bg-white p-6 rounded-xl border border-slate-200 max-w-lg mx-auto text-left">
+            {!hasDriveKeys && (
+                <div id="drive-setup" className="mt-12 bg-white p-6 rounded-xl border border-slate-200 max-w-lg mx-auto text-left">
                     <h3 className="font-bold text-slate-700 mb-4">Setup Google Drive (Optional)</h3>
                     <div className="space-y-4">
                         <input 
                             type="text" 
                             className="w-full px-4 py-2 border rounded-lg text-sm bg-slate-50"
-                            placeholder="Client ID"
+                            placeholder="Client ID (e.g. 123...apps.googleusercontent.com)"
                             value={tempClientId}
                             onChange={(e) => setTempClientId(e.target.value)}
                         />
                         <input 
                             type="text" 
                             className="w-full px-4 py-2 border rounded-lg text-sm bg-slate-50"
-                            placeholder="API Key"
+                            placeholder="Google API Key (for Drive/Sheets)"
                             value={tempApiKey}
                             onChange={(e) => setTempApiKey(e.target.value)}
                         />
-                        <button onClick={handleSaveConfig} className="w-full bg-slate-800 text-white py-2 rounded-lg text-sm font-bold">Save Credentials</button>
-                    </div>
-                    <div className="bg-amber-50 p-2 mt-4 text-[10px] text-amber-800 rounded border border-amber-200">
-                        Origin: {currentOrigin}
+                        <button onClick={handleSaveConfig} className="w-full bg-slate-800 text-white py-2 rounded-lg text-sm font-bold">Save Drive Credentials</button>
                     </div>
                 </div>
             )}
             
-            {hasKeys && (
+            {(hasDriveKeys || effectiveGeminiKey) && (
                 <div className="mt-8">
-                     <button onClick={handleReset} className="text-xs text-slate-400 underline hover:text-red-500">Reset Credentials</button>
+                     <button onClick={handleReset} className="text-xs text-slate-400 underline hover:text-red-500">Reset All Credentials</button>
                 </div>
             )}
 
@@ -592,11 +635,11 @@ const App: React.FC = () => {
                 </button>
                 </>
             )}
-            {appState === AppState.IDLE && (clientId || googleApiKey) && (
+            {appState === AppState.IDLE && (clientId || googleApiKey || effectiveGeminiKey) && (
                 <button 
                     onClick={handleReset}
                     className="text-xs text-slate-400 hover:text-red-500 transition px-2"
-                    title="Clear Credentials"
+                    title="Clear All Credentials"
                 >
                     Reset Keys
                 </button>

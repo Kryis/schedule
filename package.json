@@ -1,7 +1,7 @@
 {
   "name": "smart-schedule-pwa",
   "private": true,
-  "version": "2.2.0",
+  "version": "2.2.1",
   "type": "module",
   "homepage": "https://YOUR_GITHUB_USER.github.io/YOUR_REPO_NAME",
   "scripts": {
@@ -13,7 +13,7 @@
     "deploy": "gh-pages -d dist"
   },
   "dependencies": {
-    "@google/genai": "^0.0.12",
+    "@google/genai": "^0.2.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "xlsx": "^0.18.5"
